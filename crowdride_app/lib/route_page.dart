@@ -68,6 +68,7 @@ class _RoutePageState extends State<RoutePage> {
       _activeSuggestions = searchIloiloPlaces(value);
       if (_phase != _RoutePagePhase.searchList) {
         _phase = _RoutePagePhase.searchList;
+        _mapController.clearSelectedRoute();
       }
     });
   }
@@ -79,6 +80,7 @@ class _RoutePageState extends State<RoutePage> {
       _activeSuggestions = searchIloiloPlaces(value);
       if (_phase != _RoutePagePhase.searchList) {
         _phase = _RoutePagePhase.searchList;
+        _mapController.clearSelectedRoute();
       }
     });
   }
@@ -120,7 +122,6 @@ class _RoutePageState extends State<RoutePage> {
     final fromText = _fromController.text.trim();
     final destText = _destController.text.trim();
 
-    // If nothing is entered in either search box, show all 25 ELPTRP routes
     if (fromText.isEmpty && destText.isEmpty) {
       return (
         items: iloiloElptrpRoutes
@@ -133,7 +134,6 @@ class _RoutePageState extends State<RoutePage> {
     final fromPlace = _resolvePlace(_selectedFromPlace, fromText);
     final destPlace = _resolvePlace(_selectedDestPlace, destText);
 
-    // 380m threshold counts as a route passing directly by that landmark/street
     const double passThresholdMeters = 380.0;
 
     final List<_RouteMatchResult> directMatches = [];
@@ -197,7 +197,6 @@ class _RoutePageState extends State<RoutePage> {
       return (items: directMatches, showingNearestFallback: false);
     }
 
-    // Fallback: suggest the nearest routes to the searched From/Destination locations
     scoredAll.sort(
       (a, b) => a.nearestDistanceMeters.compareTo(b.nearestDistanceMeters),
     );
@@ -209,12 +208,23 @@ class _RoutePageState extends State<RoutePage> {
 
   void _selectRouteForPreview(ElptrpRoute route) {
     FocusScope.of(context).unfocus();
+    final fromPlace = _resolvePlace(_selectedFromPlace, _fromController.text);
+    final destPlace = _resolvePlace(_selectedDestPlace, _destController.text);
+
+    List<LatLng> clippedLeg = [];
+    if (fromPlace != null && destPlace != null) {
+      clippedLeg = route.extractSubPath(
+        fromPlace.coordinates,
+        destPlace.coordinates,
+      );
+    }
+
     setState(() {
       _selectedRoute = route;
       _activeSuggestions = [];
       _phase = _RoutePagePhase.routePreview;
     });
-    _mapController.selectRoute(route);
+    _mapController.selectRoute(route, tripSegment: clippedLeg);
   }
 
   List<Marker> _buildEndpointPinMarkers() {
@@ -317,6 +327,7 @@ class _RoutePageState extends State<RoutePage> {
 
     return Scaffold(
       backgroundColor: const Color(0xFFF6F4EE),
+      resizeToAvoidBottomInset: false,
       body: SafeArea(
         child: Column(
           children: [
@@ -417,9 +428,9 @@ class _RoutePageState extends State<RoutePage> {
                                 final place = _activeSuggestions[index];
                                 return ListTile(
                                   dense: true,
-                                  leading: const Icon(
-                                    Icons.location_on,
-                                    color: Color(0xFF2B6770),
+                                  leading: Icon(
+                                    iconForIloiloCategory(place.category),
+                                    color: const Color(0xFF2B6770),
                                     size: 20,
                                   ),
                                   title: Text(
@@ -456,36 +467,71 @@ class _RoutePageState extends State<RoutePage> {
                       ),
                     ),
 
-                  // PHASE 3: ZOOM BUTTONS ABOVE LOWERED TRACKING CONTAINER
-                  if (_phase == _RoutePagePhase.tracking)
+                  // PHASE 2 & 3: FACE NORTH COMPASS + ZOOM BUTTONS
+                  if (_phase == _RoutePagePhase.routePreview ||
+                      _phase == _RoutePagePhase.tracking)
                     Positioned(
                       right: 16,
-                      bottom: 152,
+                      bottom: _phase == _RoutePagePhase.tracking ? 152 : 256,
                       child: Column(
                         children: [
-                          GestureDetector(
-                            onTap: () => _mapController.zoomBy(1.3),
-                            child: SizedBox(
-                              width: 44,
-                              height: 44,
-                              child: Image.asset(
-                                'assets/buttons/zoom_in.png',
-                                fit: BoxFit.contain,
+                          ValueListenableBuilder<double>(
+                            valueListenable: _mapController.rotationNotifier,
+                            builder: (context, rotationDeg, _) {
+                              return GestureDetector(
+                                onTap: _mapController.resetNorth,
+                                child: Container(
+                                  width: 44,
+                                  height: 44,
+                                  decoration: const BoxDecoration(
+                                    color: Color(0xFF2B6770),
+                                    shape: BoxShape.circle,
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black26,
+                                        blurRadius: 4,
+                                        offset: Offset(0, 2),
+                                      ),
+                                    ],
+                                  ),
+                                  child: Transform.rotate(
+                                    angle: rotationDeg * (3.14159265 / 180.0),
+                                    child: const Icon(
+                                      Icons.navigation,
+                                      color: Color(0xFFF7941D),
+                                      size: 22,
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                          if (_phase == _RoutePagePhase.tracking) ...[
+                            const SizedBox(height: 8),
+                            GestureDetector(
+                              onTap: () => _mapController.zoomBy(1.3),
+                              child: SizedBox(
+                                width: 44,
+                                height: 44,
+                                child: Image.asset(
+                                  'assets/buttons/zoom_in.png',
+                                  fit: BoxFit.contain,
+                                ),
                               ),
                             ),
-                          ),
-                          const SizedBox(height: 8),
-                          GestureDetector(
-                            onTap: () => _mapController.zoomBy(0.75),
-                            child: SizedBox(
-                              width: 44,
-                              height: 44,
-                              child: Image.asset(
-                                'assets/buttons/zoom_out.png',
-                                fit: BoxFit.contain,
+                            const SizedBox(height: 8),
+                            GestureDetector(
+                              onTap: () => _mapController.zoomBy(0.75),
+                              child: SizedBox(
+                                width: 44,
+                                height: 44,
+                                child: Image.asset(
+                                  'assets/buttons/zoom_out.png',
+                                  fit: BoxFit.contain,
+                                ),
                               ),
                             ),
-                          ),
+                          ],
                         ],
                       ),
                     ),
@@ -713,6 +759,7 @@ class _RoutePageState extends State<RoutePage> {
                 setState(() {
                   _phase = _RoutePagePhase.searchList;
                 });
+                _mapController.clearSelectedRoute();
               },
               child: const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 24, vertical: 2),

@@ -12,8 +12,9 @@ import 'profile_page.dart';
 import 'route_page.dart';
 import 'splash_screen.dart';
 
-void main() {
-  isLoggedInNotifier.value = false;
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await LocalAccountStorage.init();
   runApp(const MyApp());
 }
 
@@ -132,7 +133,7 @@ class _MapScreenState extends State<MapScreen> {
       _placeResults = [];
       _routeResults = [];
     });
-    final targetZoom = place.category == 'District' ? 14.5 : 16.2;
+    final targetZoom = place.category == 'District' ? 14.5 : 16.5;
     _mapController.animateTo(place.coordinates, zoom: targetZoom);
   }
 
@@ -149,7 +150,6 @@ class _MapScreenState extends State<MapScreen> {
   Future<void> _handleLocateTap() async {
     if (_isLocating) return;
 
-    // 1. If Location Access is turned OFF in Privacy settings, just zoom out & center
     if (!locationEnabledNotifier.value) {
       _mapController.clearUserLocation();
       _mapController.resetView();
@@ -158,7 +158,6 @@ class _MapScreenState extends State<MapScreen> {
 
     setState(() => _isLocating = true);
     try {
-      // 2. Verify device GPS service and location permission
       final serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
         _mapController.clearUserLocation();
@@ -178,7 +177,6 @@ class _MapScreenState extends State<MapScreen> {
         return;
       }
 
-      // 3. Acquire current GPS coordinates
       final position = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high,
@@ -188,7 +186,6 @@ class _MapScreenState extends State<MapScreen> {
 
       final currentLatLng = LatLng(position.latitude, position.longitude);
 
-      // 4. Center on user if inside Iloilo City; otherwise fall back to city center
       if (CrowdRideMapController.iloiloCityBounds.contains(currentLatLng)) {
         _mapController.showUserLocation(currentLatLng, zoom: 16.5);
       } else {
@@ -206,7 +203,6 @@ class _MapScreenState extends State<MapScreen> {
         }
       }
     } catch (_) {
-      // Timeout or sensor error falls back cleanly to default zoom-out & center
       _mapController.clearUserLocation();
       _mapController.resetView();
     } finally {
@@ -222,6 +218,7 @@ class _MapScreenState extends State<MapScreen> {
         _placeResults.isNotEmpty || _routeResults.isNotEmpty;
 
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       body: Stack(
         children: [
           // 1. ILOILO CITY 3-LAYER INTERACTIVE MAP
@@ -235,6 +232,7 @@ class _MapScreenState extends State<MapScreen> {
             left: 16,
             right: 16,
             child: SafeArea(
+              bottom: false,
               child: Padding(
                 padding: const EdgeInsets.only(top: 12),
                 child: Column(
@@ -551,247 +549,334 @@ class _MapScreenState extends State<MapScreen> {
             ),
           ),
 
-          // 3. ACTIVE HIGHLIGHTED ROUTE OR TRAFFIC LEGEND BANNER
+          // 3. BOTTOM CONTROLS WRAPPED IN SAFEAREA (Prevents Android Nav Bar Overlap)
           Positioned(
-            left: 16,
-            right: 76,
-            bottom: 114,
-            child: ValueListenableBuilder<CrowdRideMapLayer>(
-              valueListenable: _mapController.layerNotifier,
-              builder: (context, activeLayer, _) {
-                if (activeLayer == CrowdRideMapLayer.traffic) {
-                  return Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF2B6770).withValues(alpha: 0.95),
-                      borderRadius: BorderRadius.circular(10),
-                      boxShadow: const [
-                        BoxShadow(color: Colors.black26, blurRadius: 4),
-                      ],
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          'TRAFFIC: $_trafficPeriodLabel',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w900,
-                            fontSize: 11,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Row(
-                          children: [
-                            _legendDot(const Color(0xFF00C853), 'Clear'),
-                            const SizedBox(width: 8),
-                            _legendDot(const Color(0xFFFFD600), 'Mod'),
-                            const SizedBox(width: 8),
-                            _legendDot(const Color(0xFFFF6D00), 'Busy'),
-                            const SizedBox(width: 8),
-                            _legendDot(const Color(0xFFD50000), 'Rush'),
-                          ],
-                        ),
-                      ],
-                    ),
-                  );
-                }
-
-                if (activeLayer == CrowdRideMapLayer.transport) {
-                  return ValueListenableBuilder<ElptrpRoute?>(
-                    valueListenable: _mapController.selectedRouteNotifier,
-                    builder: (context, selectedRoute, _) {
-                      if (selectedRoute == null) return const SizedBox.shrink();
-                      return Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 8,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
-                            color: selectedRoute.color,
-                            width: 2,
-                          ),
-                          boxShadow: const [
-                            BoxShadow(color: Colors.black26, blurRadius: 6),
-                          ],
-                        ),
-                        child: Row(
-                          children: [
-                            CircleAvatar(
-                              radius: 13,
-                              backgroundColor: selectedRoute.color,
-                              child: Text(
-                                '${selectedRoute.routeNumber}',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    selectedRoute.name,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                  Text(
-                                    selectedRoute.corridorSummary,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      fontSize: 10,
-                                      color: Colors.black54,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            GestureDetector(
-                              onTap: _mapController.clearSelectedRoute,
-                              child: const Icon(
-                                Icons.close,
-                                size: 18,
-                                color: Colors.black54,
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  );
-                }
-
-                return const SizedBox.shrink();
-              },
-            ),
-          ),
-
-          // 4. ASPECT-RATIO LOCKED ZOOM BUTTONS
-          Positioned(
-            right: 16,
-            bottom: 114,
-            child: Column(
-              children: [
-                GestureDetector(
-                  onTap: () => _mapController.zoomBy(1.3),
-                  child: SizedBox(
-                    width: 48,
-                    height: 48,
-                    child: Image.asset(
-                      'assets/buttons/zoom_in.png',
-                      fit: BoxFit.contain,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                GestureDetector(
-                  onTap: () => _mapController.zoomBy(0.75),
-                  child: SizedBox(
-                    width: 48,
-                    height: 48,
-                    child: Image.asset(
-                      'assets/buttons/zoom_out.png',
-                      fit: BoxFit.contain,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          // 5. ASPECT-RATIO LOCKED BOTTOM BAR
-          Positioned(
-            left: 12,
-            right: 12,
-            bottom: 16,
-            child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 480),
-                child: Stack(
-                  alignment: Alignment.bottomCenter,
-                  clipBehavior: Clip.none,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: GestureDetector(
-                            onTap: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) => const RoutePage(),
-                                ),
-                              );
-                            },
-                            child: Image.asset(
-                              'assets/buttons/route_button.png',
-                              fit: BoxFit.contain,
+                    // Row above bottom bar: Active Route/Traffic Banner + Face North & Zoom Buttons
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          // Left Banner (Traffic Legend or Selected Route)
+                          Expanded(
+                            child: ValueListenableBuilder<CrowdRideMapLayer>(
+                              valueListenable: _mapController.layerNotifier,
+                              builder: (context, activeLayer, _) {
+                                if (activeLayer == CrowdRideMapLayer.traffic) {
+                                  return Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 8,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF2B6770)
+                                          .withValues(alpha: 0.95),
+                                      borderRadius: BorderRadius.circular(10),
+                                      boxShadow: const [
+                                        BoxShadow(
+                                          color: Colors.black26,
+                                          blurRadius: 4,
+                                        ),
+                                      ],
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          'TRAFFIC: $_trafficPeriodLabel',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.w900,
+                                            fontSize: 11,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Row(
+                                          children: [
+                                            _legendDot(
+                                              const Color(0xFF00C853),
+                                              'Clear',
+                                            ),
+                                            const SizedBox(width: 8),
+                                            _legendDot(
+                                              const Color(0xFFFFD600),
+                                              'Mod',
+                                            ),
+                                            const SizedBox(width: 8),
+                                            _legendDot(
+                                              const Color(0xFFFF6D00),
+                                              'Busy',
+                                            ),
+                                            const SizedBox(width: 8),
+                                            _legendDot(
+                                              const Color(0xFFD50000),
+                                              'Rush',
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                }
+
+                                if (activeLayer ==
+                                    CrowdRideMapLayer.transport) {
+                                  return ValueListenableBuilder<ElptrpRoute?>(
+                                    valueListenable:
+                                        _mapController.selectedRouteNotifier,
+                                    builder: (context, selectedRoute, _) {
+                                      if (selectedRoute == null) {
+                                        return const SizedBox.shrink();
+                                      }
+                                      return Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 8,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white,
+                                          borderRadius:
+                                              BorderRadius.circular(10),
+                                          border: Border.all(
+                                            color: selectedRoute.color,
+                                            width: 2,
+                                          ),
+                                          boxShadow: const [
+                                            BoxShadow(
+                                              color: Colors.black26,
+                                              blurRadius: 6,
+                                            ),
+                                          ],
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            CircleAvatar(
+                                              radius: 13,
+                                              backgroundColor:
+                                                  selectedRoute.color,
+                                              child: Text(
+                                                '${selectedRoute.routeNumber}',
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                              ),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Text(
+                                                    selectedRoute.name,
+                                                    maxLines: 1,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                    style: const TextStyle(
+                                                      fontWeight:
+                                                          FontWeight.bold,
+                                                      fontSize: 12,
+                                                    ),
+                                                  ),
+                                                  Text(
+                                                    selectedRoute
+                                                        .corridorSummary,
+                                                    maxLines: 1,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                    style: const TextStyle(
+                                                      fontSize: 10,
+                                                      color: Colors.black54,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                            GestureDetector(
+                                              onTap: _mapController
+                                                  .clearSelectedRoute,
+                                              child: const Icon(
+                                                Icons.close,
+                                                size: 18,
+                                                color: Colors.black54,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                    },
+                                  );
+                                }
+
+                                return const SizedBox.shrink();
+                              },
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: GestureDetector(
-                            onTap: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) => isLoggedInNotifier.value
-                                      ? const ProfilePage()
-                                      : const LoggedOutProfilePage(),
-                                ),
-                              );
-                            },
-                            child: Image.asset(
-                              'assets/buttons/profile_button.png',
-                              fit: BoxFit.contain,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    Positioned(
-                      bottom: 16,
-                      child: GestureDetector(
-                        onTap: _handleLocateTap,
-                        child: SizedBox(
-                          width: 80,
-                          height: 80,
-                          child: Stack(
-                            alignment: Alignment.center,
+
+                          const SizedBox(width: 10),
+
+                          // Right Column: Face North (Compass) + Zoom In + Zoom Out
+                          Column(
+                            mainAxisSize: MainAxisSize.min,
                             children: [
-                              Image.asset(
-                                'assets/buttons/locate_button.png',
-                                fit: BoxFit.contain,
+                              ValueListenableBuilder<double>(
+                                valueListenable:
+                                    _mapController.rotationNotifier,
+                                builder: (context, rotationDeg, _) {
+                                  return GestureDetector(
+                                    onTap: _mapController.resetNorth,
+                                    child: Container(
+                                      width: 48,
+                                      height: 48,
+                                      decoration: const BoxDecoration(
+                                        color: Color(0xFF2B6770),
+                                        shape: BoxShape.circle,
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: Colors.black26,
+                                            blurRadius: 4,
+                                            offset: Offset(0, 2),
+                                          ),
+                                        ],
+                                      ),
+                                      child: Transform.rotate(
+                                        angle:
+                                            rotationDeg * (3.14159265 / 180.0),
+                                        child: const Icon(
+                                          Icons.navigation,
+                                          color: Color(0xFFF7941D),
+                                          size: 24,
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                },
                               ),
-                              if (_isLocating)
-                                const SizedBox(
-                                  width: 24,
-                                  height: 24,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2.5,
-                                    color: Colors.white,
+                              const SizedBox(height: 8),
+                              GestureDetector(
+                                onTap: () => _mapController.zoomBy(1.3),
+                                child: SizedBox(
+                                  width: 48,
+                                  height: 48,
+                                  child: Image.asset(
+                                    'assets/buttons/zoom_in.png',
+                                    fit: BoxFit.contain,
                                   ),
                                 ),
+                              ),
+                              const SizedBox(height: 8),
+                              GestureDetector(
+                                onTap: () => _mapController.zoomBy(0.75),
+                                child: SizedBox(
+                                  width: 48,
+                                  height: 48,
+                                  child: Image.asset(
+                                    'assets/buttons/zoom_out.png',
+                                    fit: BoxFit.contain,
+                                  ),
+                                ),
+                              ),
                             ],
                           ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    // Bottom Action Bar (Route | Locate | Profile)
+                    Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 480),
+                        child: Stack(
+                          alignment: Alignment.bottomCenter,
+                          clipBehavior: Clip.none,
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: GestureDetector(
+                                    onTap: () {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (context) =>
+                                              const RoutePage(),
+                                        ),
+                                      );
+                                    },
+                                    child: Image.asset(
+                                      'assets/buttons/route_button.png',
+                                      fit: BoxFit.contain,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: GestureDetector(
+                                    onTap: () {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (context) =>
+                                              isLoggedInNotifier.value
+                                                  ? const ProfilePage()
+                                                  : const LoggedOutProfilePage(),
+                                        ),
+                                      );
+                                    },
+                                    child: Image.asset(
+                                      'assets/buttons/profile_button.png',
+                                      fit: BoxFit.contain,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            Positioned(
+                              bottom: 14,
+                              child: GestureDetector(
+                                onTap: _handleLocateTap,
+                                child: SizedBox(
+                                  width: 80,
+                                  height: 80,
+                                  child: Stack(
+                                    alignment: Alignment.center,
+                                    children: [
+                                      Image.asset(
+                                        'assets/buttons/locate_button.png',
+                                        fit: BoxFit.contain,
+                                      ),
+                                      if (_isLocating)
+                                        const SizedBox(
+                                          width: 24,
+                                          height: 24,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2.5,
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),

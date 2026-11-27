@@ -468,6 +468,40 @@ class ElptrpRoute {
     return sqrt(minDistSq);
   }
 
+  /// Clips the snapped road waypoints to the exact sub-segment between [fromPoint] and [destPoint]
+  List<LatLng> extractSubPath(LatLng fromPoint, LatLng destPoint) {
+    final pts = activeWaypoints;
+    if (pts.length < 2) return [];
+
+    int closestIndex(LatLng target) {
+      const dist = Distance();
+      int bestIdx = 0;
+      double bestMeters = double.infinity;
+      for (int i = 0; i < pts.length; i++) {
+        final d = dist.as(LengthUnit.Meter, pts[i], target);
+        if (d < bestMeters) {
+          bestMeters = d;
+          bestIdx = i;
+        }
+      }
+      return bestIdx;
+    }
+
+    final int startIdx = closestIndex(fromPoint);
+    final int endIdx = closestIndex(destPoint);
+
+    if (startIdx == endIdx) {
+      final int next = (startIdx + 1).clamp(0, pts.length - 1);
+      return startIdx == next ? [] : [pts[startIdx], pts[next]];
+    }
+
+    if (startIdx < endIdx) {
+      return pts.sublist(startIdx, endIdx + 1);
+    } else {
+      return pts.sublist(endIdx, startIdx + 1).reversed.toList();
+    }
+  }
+
   void rebuildTracer() {
     tracer = RoutePathTracer(activeWaypoints);
   }

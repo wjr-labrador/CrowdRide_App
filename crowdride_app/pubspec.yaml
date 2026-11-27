@@ -14,13 +14,23 @@ dependencies:
   cupertino_icons: ^1.0.8
   flutter_map: ^7.0.2
   latlong2: ^0.9.1
+  http: ^1.2.2
   geolocator: ^14.1.2
   image_picker: ^1.1.2
+  shared_preferences: ^2.3.3
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.3
+
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/logo.png"
+  adaptive_icon_background: "#F6F4EE"
+  adaptive_icon_foreground: "assets/logo.png"
 
 flutter:
   uses-material-design: true
@@ -34,12 +44,8 @@ flutter:
     - assets/settings_page/appearance_display/
     - assets/settings_page/privacy/
     - assets/settings_page/offline/
-    - assets/settings_page/delete/   
-    - assets/settings_page/support/ 
+    - assets/settings_page/delete/
+    - assets/settings_page/support/
     - assets/create_profile/
     - assets/edit_profile/
     - assets/route_page/
-    
-
-    
-    

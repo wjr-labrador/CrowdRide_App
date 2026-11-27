@@ -1,6 +1,9 @@
+import 'dart:convert';
 import 'dart:typed_data';
 import 'package:material_ui/material_ui.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'edit_profile_page.dart';
+import 'logged_out_profile_page.dart';
 import 'settings_page.dart';
 
 class UserProfile {
@@ -28,6 +31,78 @@ final ValueNotifier<UserProfile> userProfileNotifier =
     address: '',
   ),
 );
+
+/// Local device storage helper for saving and restoring the user's CrowdRide profile
+class LocalAccountStorage {
+  static const String _kLoggedIn = 'crowdride_is_logged_in';
+  static const String _kName = 'crowdride_profile_name';
+  static const String _kAge = 'crowdride_profile_age';
+  static const String _kOccupation = 'crowdride_profile_occupation';
+  static const String _kAddress = 'crowdride_profile_address';
+  static const String _kPhotoBase64 = 'crowdride_profile_photo_b64';
+
+  static bool _listenersAttached = false;
+
+  static Future<void> init() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedLoggedIn = prefs.getBool(_kLoggedIn) ?? false;
+    final name = prefs.getString(_kName) ?? '';
+    final age = prefs.getString(_kAge) ?? '';
+    final occupation = prefs.getString(_kOccupation) ?? '';
+    final address = prefs.getString(_kAddress) ?? '';
+    final photoB64 = prefs.getString(_kPhotoBase64);
+
+    Uint8List? bytes;
+    if (photoB64 != null && photoB64.isNotEmpty) {
+      try {
+        bytes = base64Decode(photoB64);
+      } catch (_) {}
+    }
+
+    isLoggedInNotifier.value = savedLoggedIn;
+    userProfileNotifier.value = UserProfile(
+      name: name,
+      age: age,
+      occupation: occupation,
+      address: address,
+      photoBytes: bytes,
+    );
+
+    if (!_listenersAttached) {
+      _listenersAttached = true;
+      userProfileNotifier.addListener(_persistAll);
+      isLoggedInNotifier.addListener(_persistAll);
+    }
+  }
+
+  static Future<void> _persistAll() async {
+    final prefs = await SharedPreferences.getInstance();
+    final profile = userProfileNotifier.value;
+    final loggedIn = isLoggedInNotifier.value;
+
+    await prefs.setBool(_kLoggedIn, loggedIn);
+    await prefs.setString(_kName, profile.name);
+    await prefs.setString(_kAge, profile.age);
+    await prefs.setString(_kOccupation, profile.occupation);
+    await prefs.setString(_kAddress, profile.address);
+
+    if (profile.photoBytes != null && profile.photoBytes!.isNotEmpty) {
+      await prefs.setString(_kPhotoBase64, base64Encode(profile.photoBytes!));
+    } else {
+      await prefs.remove(_kPhotoBase64);
+    }
+  }
+
+  static Future<void> clearAccount() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_kLoggedIn);
+    await prefs.remove(_kName);
+    await prefs.remove(_kAge);
+    await prefs.remove(_kOccupation);
+    await prefs.remove(_kAddress);
+    await prefs.remove(_kPhotoBase64);
+  }
+}
 
 class ProfilePage extends StatelessWidget {
   const ProfilePage({super.key});

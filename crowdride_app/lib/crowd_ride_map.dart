@@ -27,11 +27,17 @@ class CrowdRideMapController {
   final ValueNotifier<ElptrpRoute?> selectedRouteNotifier =
       ValueNotifier<ElptrpRoute?>(null);
 
+  /// Road-clipped polyline segment highlighting the user's From -> Destination leg
+  final ValueNotifier<List<LatLng>> tripHighlightNotifier =
+      ValueNotifier<List<LatLng>>([]);
+
   final ValueNotifier<LatLng?> selectedPinNotifier =
       ValueNotifier<LatLng?>(null);
 
   final ValueNotifier<LatLng?> userLocationNotifier =
       ValueNotifier<LatLng?>(null);
+
+  final ValueNotifier<double> rotationNotifier = ValueNotifier<double>(0.0);
 
   final ValueNotifier<DateTime> timeNotifier =
       ValueNotifier<DateTime>(DateTime.now());
@@ -42,6 +48,7 @@ class CrowdRideMapController {
   final ValueNotifier<int> osmSyncRevision = ValueNotifier<int>(0);
 
   void Function(LatLng target, double zoom)? _animateCallback;
+  void Function(double targetDegrees)? _rotateCallback;
 
   static const LatLng iloiloCenter = LatLng(10.7145, 122.5550);
 
@@ -103,11 +110,23 @@ class CrowdRideMapController {
     }
   }
 
-  void selectRoute(ElptrpRoute? route) {
+  void setTripHighlight(List<LatLng> roadClippedPoints) {
+    tripHighlightNotifier.value = roadClippedPoints;
+  }
+
+  void clearTripHighlight() {
+    tripHighlightNotifier.value = [];
+  }
+
+  void selectRoute(ElptrpRoute? route, {List<LatLng>? tripSegment}) {
     selectedRouteNotifier.value = route;
+    tripHighlightNotifier.value = tripSegment ?? [];
     if (route != null) {
       layerNotifier.value = CrowdRideMapLayer.transport;
-      _fitRouteBounds(route.activeWaypoints);
+      final focusPoints = (tripSegment != null && tripSegment.length >= 2)
+          ? tripSegment
+          : route.activeWaypoints;
+      _fitRouteBounds(focusPoints);
     }
   }
 
@@ -116,18 +135,33 @@ class CrowdRideMapController {
     final bounds = LatLngBounds.fromPoints(points);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       try {
-        mapController.fitCamera(
-          CameraFit.bounds(
-            bounds: bounds,
-            padding: const EdgeInsets.fromLTRB(48, 175, 48, 185),
-          ),
-        );
+        final fit = CameraFit.bounds(
+          bounds: bounds,
+          padding: const EdgeInsets.fromLTRB(56, 175, 56, 210),
+        ).fit(mapController.camera);
+        if (_animateCallback != null) {
+          _animateCallback!(fit.center, fit.zoom);
+        } else {
+          mapController.move(fit.center, fit.zoom);
+        }
       } catch (_) {}
     });
   }
 
   void clearSelectedRoute() {
     selectedRouteNotifier.value = null;
+    tripHighlightNotifier.value = [];
+  }
+
+  /// Smoothly rotates the map back to 0° (North up)
+  void resetNorth() {
+    if (layerNotifier.value == CrowdRideMapLayer.plain) return;
+    if (_rotateCallback != null) {
+      _rotateCallback!(0.0);
+    } else {
+      mapController.rotate(0.0);
+      rotationNotifier.value = 0.0;
+    }
   }
 
   void zoomBy(double scaleFactor) {
@@ -182,7 +216,6 @@ class CrowdRideMapController {
     }
   }
 
-  /// Centers the map on the user's current GPS position and shows a blue dot
   void showUserLocation(LatLng position, {double zoom = 16.5}) {
     if (layerNotifier.value == CrowdRideMapLayer.plain) {
       layerNotifier.value = CrowdRideMapLayer.transport;
@@ -203,6 +236,7 @@ class CrowdRideMapController {
   void resetView() {
     selectedPinNotifier.value = null;
     selectedRouteNotifier.value = null;
+    tripHighlightNotifier.value = [];
 
     if (layerNotifier.value == CrowdRideMapLayer.plain) {
       final viewport = _getPlainViewportSize();
@@ -221,6 +255,7 @@ class CrowdRideMapController {
       return;
     }
 
+    resetNorth();
     animateTo(iloiloCenter, zoom: 13.5, showPin: false);
   }
 
@@ -228,8 +263,10 @@ class CrowdRideMapController {
     plainTransformationController.dispose();
     layerNotifier.dispose();
     selectedRouteNotifier.dispose();
+    tripHighlightNotifier.dispose();
     selectedPinNotifier.dispose();
     userLocationNotifier.dispose();
+    rotationNotifier.dispose();
     timeNotifier.dispose();
     osmSyncStatusNotifier.dispose();
     osmSyncRevision.dispose();
@@ -256,6 +293,7 @@ class _CrowdRideMapState extends State<CrowdRideMap>
   late final CrowdRideMapController _controller;
   late final bool _ownsController;
   AnimationController? _panAnimController;
+  AnimationController? _rotateAnimController;
 
   @override
   void initState() {
@@ -263,6 +301,7 @@ class _CrowdRideMapState extends State<CrowdRideMap>
     _ownsController = widget.controller == null;
     _controller = widget.controller ?? CrowdRideMapController();
     _controller._animateCallback = _smoothPanTo;
+    _controller._rotateCallback = _smoothRotateTo;
     _controller.syncOsmRoads();
   }
 
@@ -286,7 +325,7 @@ class _CrowdRideMapState extends State<CrowdRideMap>
     );
 
     _panAnimController = AnimationController(
-      duration: const Duration(milliseconds: 900),
+      duration: const Duration(milliseconds: 850),
       vsync: this,
     );
 
@@ -308,16 +347,48 @@ class _CrowdRideMapState extends State<CrowdRideMap>
     _panAnimController!.forward();
   }
 
+  void _smoothRotateTo(double targetDegrees) {
+    _rotateAnimController?.dispose();
+
+    double startDeg = _controller.mapController.camera.rotation % 360.0;
+    if (startDeg > 180.0) startDeg -= 360.0;
+    if (startDeg < -180.0) startDeg += 360.0;
+
+    final rotTween = Tween<double>(begin: startDeg, end: targetDegrees);
+
+    _rotateAnimController = AnimationController(
+      duration: const Duration(milliseconds: 450),
+      vsync: this,
+    );
+
+    final animation = CurvedAnimation(
+      parent: _rotateAnimController!,
+      curve: Curves.easeOutCubic,
+    );
+
+    _rotateAnimController!.addListener(() {
+      final val = rotTween.evaluate(animation);
+      _controller.mapController.rotate(val);
+      _controller.rotationNotifier.value = val;
+    });
+
+    _rotateAnimController!.forward();
+  }
+
   @override
   void dispose() {
     _panAnimController?.dispose();
+    _rotateAnimController?.dispose();
     if (_ownsController) {
       _controller.dispose();
     }
     super.dispose();
   }
 
-  List<Polyline> _buildTransportPolylines(ElptrpRoute? selectedRoute) {
+  List<Polyline> _buildTransportPolylines(
+    ElptrpRoute? selectedRoute,
+    List<LatLng> tripHighlight,
+  ) {
     if (selectedRoute == null) {
       return iloiloElptrpRoutes.map((route) {
         return Polyline(
@@ -340,16 +411,33 @@ class _CrowdRideMapState extends State<CrowdRideMap>
       );
     }).toList();
 
+    // Base full route polyline
     lines.add(
       Polyline(
         points: selectedRoute.activeWaypoints,
-        strokeWidth: 16.0,
+        strokeWidth: tripHighlight.length >= 2 ? 12.0 : 16.0,
         useStrokeWidthInMeter: true,
-        color: selectedRoute.color,
-        borderStrokeWidth: 2.5,
+        color: tripHighlight.length >= 2
+            ? selectedRoute.color.withValues(alpha: 0.45)
+            : selectedRoute.color,
+        borderStrokeWidth: 2.0,
         borderColor: const Color(0xFF1A252F),
       ),
     );
+
+    // Road-clipped From -> Destination highlight overlay
+    if (tripHighlight.length >= 2) {
+      lines.add(
+        Polyline(
+          points: tripHighlight,
+          strokeWidth: 20.0,
+          useStrokeWidthInMeter: true,
+          color: const Color(0xFFF7941D),
+          borderStrokeWidth: 3.5,
+          borderColor: const Color(0xFF1A252F),
+        ),
+      );
+    }
 
     return lines;
   }
@@ -416,6 +504,12 @@ class _CrowdRideMapState extends State<CrowdRideMap>
             initialZoom: 13.5,
             minZoom: 12.2,
             maxZoom: 18.0,
+            onPositionChanged: (camera, _) {
+              if ((_controller.rotationNotifier.value - camera.rotation).abs() >
+                  0.2) {
+                _controller.rotationNotifier.value = camera.rotation;
+              }
+            },
             cameraConstraint: CameraConstraint.contain(
               bounds: CrowdRideMapController.iloiloCityBounds,
             ),
@@ -447,8 +541,16 @@ class _CrowdRideMapState extends State<CrowdRideMap>
                   return ValueListenableBuilder<ElptrpRoute?>(
                     valueListenable: _controller.selectedRouteNotifier,
                     builder: (context, selectedRoute, _) {
-                      return PolylineLayer(
-                        polylines: _buildTransportPolylines(selectedRoute),
+                      return ValueListenableBuilder<List<LatLng>>(
+                        valueListenable: _controller.tripHighlightNotifier,
+                        builder: (context, tripHighlight, _) {
+                          return PolylineLayer(
+                            polylines: _buildTransportPolylines(
+                              selectedRoute,
+                              tripHighlight,
+                            ),
+                          );
+                        },
                       );
                     },
                   );
